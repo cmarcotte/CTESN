@@ -77,7 +77,7 @@ p_lower = [0.036, 2.7e7, 0.9e4]
 p_upper = [0.044, 3.3e7, 1.1e4]
 
 # select set of Sobol-sampled parameter vectors
-p	= sample(1000, p_lower, p_upper, SobolSample())
+p	= sample(10000, p_lower, p_upper, SobolSample())
 Wout 	= [zeros(Float64, modelODESize, reservoirSize) for _ in 1:length(p)]
 
 # evaluate the ESN at each p, returning WOut(p)
