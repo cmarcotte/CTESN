@@ -67,11 +67,14 @@ prob = ODEProblem(ODEFunction(f, jac=jac), u0, tspan, p0)
 sol = solve(prob, Rosenbrock23(); abstol=1e-6, reltol=1e-6, saveat=tt)
 
 
-reservoirSize = 3000
-iterative = reservoirSize > 300 # this is kind of machine-specific
+reservoirSize = 300
+iterative = reservoirSize > 300 # this is kind of machine-specific?
 
-W   = sparse(ReservoirComputing.init_reservoir_givendeg(reservoirSize, 0.8, 6))
+W   = ReservoirComputing.init_reservoir_givendeg(reservoirSize, 0.8, 6)
 Win = ReservoirComputing.init_dense_input_layer(reservoirSize, modelODESize, 0.1)
+if iterative
+	W = sparse(W)
+end
 
 function CTESN!(du, u, p, t)
 	du .= tanh.(p[1]*u .+ p[2]*p[3](t))
@@ -105,7 +108,7 @@ u_lower = [-90.0, 1e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 u_upper = [+50.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 # select set of Sobol-sampled state vectors
-u	= sample(1000, u_lower, u_upper, SobolSample()) # this generates tuples; convert to arrays in prob_func
+u	= sample(10000, u_lower, u_upper, SobolSample()) # this generates tuples; convert to arrays in prob_func
 Wout 	= [zeros(Float64, modelODESize, reservoirSize) for _ in 1:length(u)]
 
 # evaluate the ESN at each p, returning WOut(u)
