@@ -24,7 +24,7 @@ end
 
 # define original parameters and initial condition
 p0 = (0.04, 3e7, 1e4)
-u0 = [0.7; 0.2; 0.3]; u0 = u0./sum(u0) # to enforce sum(u) == 1.0
+u0 = [0.6; 0.3; 0.9]; u0 = u0./sum(u0) # to enforce sum(u) == 1.0
 tspan = (0.0, 1e7)
 tt = 10.0.^collect(range(-5.0, +5.0; length=33))
 modelODESize = length(u0)
