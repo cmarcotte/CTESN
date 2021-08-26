@@ -1,4 +1,4 @@
-using DifferentialEquations, ReservoirComputing, Surrogates, ModelingToolkit, Plots, MLJLinearModels, SparseArrays
+using DifferentialEquations, ReservoirComputing, Surrogates, ModelingToolkit, Plots, MLJLinearModels, SparseArrays, ProgressBars
 
 function ab(C::Array{Float64,1},V)
 	# eq (13) from original paper
@@ -18,7 +18,7 @@ function BR!(dx,x,p,t)
 	IK = 0.35*IK
 	Ix = x[3]*0.8*(exp(0.04*(x[1]+77.0))-1.0)/exp(0.04*(x[1]+35.0))
 	INa= (4.0*x[4]*x[4]*x[4]*x[5]*x[6] + 0.003)*(x[1]-50.0)
-	Is = 0.09*x[7]*x[8]*(x[1]+82.3+13.0287*log(Casmoother(x[2])))
+	Is = 0.09*x[7]*x[8]*(x[1]+82.3+13.0287*log(x[2]))#Casmoother(x[2])))
 
 	# these from Beeler & Reuter table:
 	ax = ab([ 0.0005, 0.083, 50.0, 0.0, 0.0, 0.057, 1.0],x[1])
@@ -50,11 +50,11 @@ end
 
 # define original parameters and initial condition
 # initial condition
-u0 = [ -20.0,10^-7,0.01,0.01,0.99,0.99,0.01,0.99]
+u0 = [ -60.0,10^-7,0.01,0.01,0.99,0.99,0.01,0.99]
 # parameters 
 p0 = (1.0)
 tspan = (0.0, 1e3)
-tt = 10.0.^collect(range(-3.0, +3.0; length=257))
+tt = 10.0.^collect(range(-3.0, +3.0; length=129))
 modelODESize = length(u0)
 
 # define ODEProblem, optimize it, and solve for original ODE solution at (u0, p0)
@@ -64,7 +64,7 @@ sys = modelingtoolkitize(prob)
 f   = eval(ModelingToolkit.generate_function(sys)[2])
 jac = eval(ModelingToolkit.generate_jacobian(sys)[2])
 prob = ODEProblem(ODEFunction(f, jac=jac), u0, tspan, p0)
-sol = solve(prob, Rosenbrock23(); abstol=1e-6, reltol=1e-6, saveat=tt)
+sol = solve(prob, Rosenbrock23(); abstol=1e-10, reltol=1e-8, saveat=tt)
 
 
 reservoirSize = 300
@@ -104,8 +104,10 @@ end
 fitData!(Wout, sol[:,:], r[:,:]; beta=0.01)
 
 # define lower and upper bounds for each variable
-u_lower = [-90.0, 1e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-u_upper = [+50.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+u_lower = minimum(sol, dims=2)
+u_upper = maximum(sol, dims=2)
+#u_lower = u0 .+ 1e-1.*abs.(u0)
+#u_upper = u0 .- 1e-1.*abs.(u0)
 
 # select set of Sobol-sampled state vectors
 u	= sample(10000, u_lower, u_upper, SobolSample()) # this generates tuples; convert to arrays in prob_func
@@ -118,11 +120,11 @@ function fitSamples!(Wout, u)
 		return remake(prob, u0=[u[i][j] for j=1:8])
 	end
 	ensprob = EnsembleProblem(prob, prob_func = prob_func)
-	sim = solve(ensprob, Rosenbrock23(), EnsembleThreads(); trajectories=length(u), abstol=1e-6, reltol=1e-6, saveat=sol.t)
-	for n in 1:length(u)
-		print("Fitting u[$(n)]...   \t")
+	sim = solve(ensprob, Rosenbrock23(), EnsembleThreads(); trajectories=length(u), abstol=1e-10, reltol=1e-8, saveat=sol.t)
+	for n in ProgressBar(1:length(u))
+		#print("Fitting u[$(n)]...   \t")
 		fitData!(Wout[n], sim[n], r; beta = 1e-6)
-		print("Done.\n")
+		#print("Done.\n")
 	end
 	return nothing
 end
@@ -132,7 +134,7 @@ fitSamples!(Wout, u)
 WoutInterpolant = RadialBasis(u, Wout, u_lower, u_upper)
 
 # define unseen p̂ ensure it is not in p
-û= u0 .+ 1e-16 .* randn(size(u0))
+û= u0
 issampled = false;
 for n in 1:length(u), m in 1:length(û)
 	if isapprox(û[m], u[n][m])
@@ -140,27 +142,29 @@ for n in 1:length(u), m in 1:length(û)
 		break
 	end
 end
-@assert !issampled
-
-# form Wout(p̂) and approximate x(t;p̂) from WoutInterpolant at unseen p̂
 Ŵout = reshape(WoutInterpolant(û), size(Wout[1]))
 x = Ŵout*r
-#xInterpolant = RadialBasis(collect(transpose(sol.t)), x, [tspan[begin]], [tspan[end]])
+if issampled
+	û= u0 .+ 1e-3 .* randn(size(u0)) .* u0
+	# form Wout(p̂) and approximate x(t;p̂) from WoutInterpolant at unseen p̂
+	Ŵout = reshape(WoutInterpolant(û), size(Wout[1]))
+	x = Ŵout*r
+	#xInterpolant = RadialBasis(collect(transpose(sol.t)), x, [tspan[begin]], [tspan[end]])
 
-sol_hat = solve(remake(prob, u0=û), Rosenbrock23(); abstol=1e-6, reltol=1e-6, saveat=sol.t)
+	sol_hat = solve(remake(prob, u0=û), Rosenbrock23(); abstol=1e-6, reltol=1e-6, saveat=sol.t)
+	
+end
 
-p1 = plot(sol, vars=(0,1))
-plot!(p1, sol_hat, vars=(0,1), linestyle=:dash, linewidth=2)
-plot!(p1, sol.t, x[1,:], linestyle=:dot, linewidth=3)
-plot!(p1, xscale=:log)
-p2 = plot(sol, vars=(0,2))
-plot!(p2, sol_hat, vars=(0,2), linestyle=:dash, linewidth=2)
-plot!(p2, sol.t, x[2,:], linestyle=:dot, linewidth=3)
-plot!(p2, xscale=:log)
-p3 = plot(sol, vars=(0,3:8))
-plot!(p3, sol_hat, vars=(0,3:8), linestyle=:dash, linewidth=2)
-plot!(p3, sol.t, transpose(x[3:8,:]), linestyle=:dot, linewidth=3)
-plot!(p3, xscale=:log)
-plot(p1,p2,p3,layout = (3, 1))
+pp = []
+for n=1:length(u0)
+	plt = plot(sol, vars=(0,n))
+	if issampled; plot!(plt, sol_hat, vars=(0,n), linestyle=:dash, linewidth=2); end
+	plot!(plt, sol.t, x[n,:], linestyle=:dot, linewidth=3)
+	plot!(plt, xscale=:log)
+	plot!(legend=false)
+	#if n==2; plot!(plt, yscale=:log); end
+	push!(pp, plt)
+end
+plot(pp[1], pp[2], pp[3], pp[4], pp[5], pp[6], pp[7], pp[8], size=(1000,500), layout=(2,4))
 savefig("./BR_CTESN.svg")
 
