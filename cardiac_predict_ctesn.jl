@@ -110,7 +110,7 @@ u_upper = maximum(sol, dims=2)
 #u_upper = u0 .- 1e-1.*abs.(u0)
 
 # select set of Sobol-sampled state vectors
-u	= sample(10000, u_lower, u_upper, SobolSample()) # this generates tuples; convert to arrays in prob_func
+u	= sample(1000, u_lower, u_upper, SobolSample()) # this generates tuples; convert to arrays in prob_func
 Wout 	= [zeros(Float64, modelODESize, reservoirSize) for _ in 1:length(u)]
 
 # evaluate the ESN at each p, returning WOut(u)
